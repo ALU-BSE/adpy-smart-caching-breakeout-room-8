@@ -43,6 +43,29 @@ class PostListView(APIView):
         return [AllowAny()]
 
     def get(self, request):
+
+        # Cache key for all users.
+        cache_key = "posts:list"
+        
+        # Getting data from cache first.
+        data = cache.get(cache_key)
+
+        if data is not None:
+            # Cache HIT - return cached data directly
+            return Response(data)
+        
+        # Cache MISS - query database, cache it, and return
+        posts = Post.objects.filter(status=Post.STATUS_PUBLISHED).select_related("author")
+        serializer = PostSerializer(posts, many=True)
+        data = serializer.data
+
+        # Store in cache for 5 minutes
+        cache.set(cache_key, data, timeout=300)
+        return Response(data)
+
+
+
+
         # ---------------------------------------------------------------
         # TODO (Level 2): Implement cache-aside for this endpoint.
         #
@@ -56,9 +79,9 @@ class PostListView(APIView):
         # ---------------------------------------------------------------
 
         # REMOVE these two lines once you implement the cache below
-        posts = Post.objects.filter(status=Post.STATUS_PUBLISHED).select_related("author")
-        serializer = PostSerializer(posts, many=True)
-        return Response(serializer.data)
+        # posts = Post.objects.filter(status=Post.STATUS_PUBLISHED).select_related("author")
+        # serializer = PostSerializer(posts, many=True)
+        # return Response(serializer.data)
 
     def post(self, request):
         # ---------------------------------------------------------------
@@ -72,6 +95,7 @@ class PostListView(APIView):
         if serializer.is_valid():
             serializer.save(author=request.user)
             # YOUR CACHE INVALIDATION CODE HERE
+            cache.delete("posts:list")
             return Response(serializer.data, status=status.HTTP_201_CREATED)
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
@@ -99,7 +123,16 @@ class PostDetailView(APIView):
         # Think: why is a longer TTL acceptable here vs the list endpoint?
         # ---------------------------------------------------------------
 
-        # REMOVE these lines once you implement the cache below
+        # Unique cache key per post.
+        cache_key = f"posts:detail:{post_id}"
+
+        #checks cache first.
+        data = cache.get(cache_key)
+
+        if data is not None:
+            # Return cached data.
+            return Response(data)
+
         try:
             post = Post.objects.select_related("author").get(
                 id=post_id, status=Post.STATUS_PUBLISHED
@@ -108,7 +141,12 @@ class PostDetailView(APIView):
             return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)
 
         serializer = PostSerializer(post)
-        return Response(serializer.data)
+        data = serializer.data
+
+        #store in cache for 10 minutes
+        cache.set(cache_key, data, timeout=600)
+        return Response(data)
+        
 
 
 # ---------------------------------------------------------------------------
@@ -139,14 +177,29 @@ class MyDraftsView(APIView):
         #   What would happen if you used the key "my-drafts" for all users?
         # ---------------------------------------------------------------
 
-        # REMOVE these lines once you implement the cache below
+        # Cache key MUST include user ID 
+        cache_key = f"posts:drafts:{request.user.id}"
+
+        # Check cache first
+        data = cache.get(cache_key)
+
+        if data is not None:
+            # Return cached data 
+            return Response(data)
+        
         drafts = Post.objects.filter(
             author=request.user,
             status=Post.STATUS_DRAFT
         ).select_related("author")
 
         serializer = PostSerializer(drafts, many=True)
-        return Response(serializer.data)
+
+        data = serializer.data
+
+        # Store in cache for 2 minutes
+        cache.set(cache_key, data, timeout=120)
+        return Response(data)
+        
 
 
 # ---------------------------------------------------------------------------
